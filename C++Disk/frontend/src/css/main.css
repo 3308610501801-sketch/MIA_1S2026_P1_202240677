@@ -1,0 +1,145 @@
+:root {
+  --gutter: 8px;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: monospace;
+}
+
+body {
+  margin: 0;
+  font-family: monospace;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 100%;
+  flex: 1;
+}
+
+
+
+/* Contenedor principal */
+.entorno_trabajo {
+  background-color: black;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  gap: 10px;
+}
+
+/* Barra superior */
+.derecha {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  border: 2px solid rgb(255, 187, 0);
+  gap: 10px;
+  background-color: black;
+  padding: 10px;
+}
+
+.derecha .navegacion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.derecha .navegacion a {
+  margin: 10px;
+  border: 2px solid white;
+  color: white;
+  font-weight: bold;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 1.5rem;
+  cursor: pointer;
+
+  transition: transform 0.2s ease;
+}
+
+.derecha .navegacion a:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
+}
+
+/* Paneles del editor */
+.pane-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0%;
+  overflow: hidden;
+  border: 1px solid #ccc;
+  font-weight: bold;
+  font-size: 1.3rem;
+  margin: 0 2rem;
+}
+
+.panel-header {
+  background-color: #222;
+  color: white;
+  padding: 4px 10px;
+  font-weight: bold;
+  font-size: 1.5rem;
+}
+
+.editor-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.line-numbers {
+  background-color: #333;
+  color: #aaa;
+  padding: 10px 5px;
+  line-height: 1.4em;
+  text-align: right;
+  user-select: none;
+  white-space: pre;
+  overflow: hidden;
+}
+
+textarea {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  outline: none;
+  resize: none;
+  background-color: #1e1e1e;
+  color: #fff;
+  font-family: monospace;
+  font-size: 1.3rem;
+  font-weight: bold;
+  line-height: 1.4em;
+  overflow: auto;
+}
+
+/* Gutter (divisor) */
+.gutter {
+  height: var(--gutter);
+  background: rgb(218, 213, 213);
+  cursor: row-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.gutter:active {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .derecha .navegacion a {
+    font-size: 1.2rem;
+    padding: 4px 8px;
+  }
+}
+

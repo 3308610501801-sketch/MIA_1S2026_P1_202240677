@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Editor Split Vertical</title>
+<link rel="stylesheet" href="src/css/main.css">
+</head>
+<body>
+
+<header class="derecha"> 
+        <nav class="navegacion"> 
+            <a href="#" id="nuevo-archivo">Nuevo archivo</a>
+            <a href="#" id="cargar-archivo">Cargar archivo</a>
+            <a href="#" id="guardar-archivo">Guardar archivo</a>
+            <a href="#" id="ejecutar-analisis">Ejecutar Analisis</a>
+        </nav> 
+</header>
+
+
+<main class="layout">
+
+    <section class="entorno_trabajo">
+
+        <div class="pane-editor" id="top-panel">
+            <div class="panel-header">Codigo</div>
+            <div class="editor-wrapper">
+                <div class="line-numbers" id="line-numbers-top">1</div>
+                <textarea id="editor-top" spellcheck="false"></textarea>
+            </div>
+        </div>
+
+        <div class="gutter" id="gutter"></div>
+
+        <div class="pane-editor" id="bottom-panel">
+            <div class="panel-header">Consola</div>
+            <div class="editor-wrapper">
+                <div class="line-numbers" id="line-numbers-bottom">1</div>
+                <textarea id="editor-bottom" spellcheck="false"></textarea>
+            </div>
+        </div>
+
+    </section>
+
+
+</main>
+
+<script src="src/js/panel_division.js"></script>
+<script src="src/js/ejecutar.js"></script>
+<script src="src/js/manejo_archivos.js"></script>
+</body>
+</html>
