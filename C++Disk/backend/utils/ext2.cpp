@@ -10,7 +10,7 @@ int Ext2Manager::calcNumInodes(int partSize) {
     // sizeof de las estructuras usadas en el cálculo
     int sb  = static_cast<int>(sizeof(SuperBlock));
     int si  = static_cast<int>(sizeof(Inode));
-    int sb2 = static_cast<int>(sizeof(FolderBlock)); 
+    int sb2 = static_cast<int>(sizeof(FolderBlock));
 
     double denom = 1.0 + 3.0 + static_cast<double>(si) + 3.0 * static_cast<double>(sb2);
     double n = static_cast<double>(partSize - sb) / denom;
@@ -140,11 +140,11 @@ bool Ext2Manager::createRootDir(const std::string& diskPath, SuperBlock& sb) {
     Inode root;
     root.i_uid   = 1;
     root.i_gid   = 1;
-    root.i_size  = static_cast<int>(sizeof(FolderBlock));
+    root.i_s     = static_cast<int>(sizeof(FolderBlock));
     root.i_atime = root.i_ctime = root.i_mtime = static_cast<int>(std::time(nullptr));
-    root.i_type  = 0;  
-    root.i_perm  = 777;
-    root.i_block[0] = 0; 
+    root.i_type  = '0';
+    root.i_perm[0] = '7'; root.i_perm[1] = '7'; root.i_perm[2] = '7';
+    root.i_block[0] = 0;
 
     FolderBlock fb;
     fb.b_content[0].inodo = 0; std::strcpy(fb.b_content[0].name, ".");
@@ -158,12 +158,11 @@ bool Ext2Manager::createRootDir(const std::string& diskPath, SuperBlock& sb) {
 
     sb.s_free_inodes_count--;
     sb.s_free_blocks_count--;
-    sb.s_first_ino = 1;
+    sb.s_firts_ino = 1;
     sb.s_first_blo = 1;
 
     return true;
 }
-
 
 //  ----------[formatPartition]----------
 bool Ext2Manager::formatPartition(const std::string& diskPath,
@@ -214,41 +213,35 @@ bool Ext2Manager::formatPartition(const std::string& diskPath,
     sb.s_umtime            = 0;
     sb.s_mnt_count         = 0;
     sb.s_magic             = 0xEF53;
-    sb.s_inode_size        = static_cast<int>(sizeof(Inode));
-    sb.s_block_size        = static_cast<int>(sizeof(FolderBlock));
-    sb.s_first_ino         = 0;
+    sb.s_inode_s           = static_cast<int>(sizeof(Inode));
+    sb.s_block_s           = static_cast<int>(sizeof(FolderBlock));
+    sb.s_firts_ino         = 0;
     sb.s_first_blo         = 0;
 
-    // Calcular posiciones absolutas en el disco
     int pos = partStart;
-    pos += static_cast<int>(sizeof(SuperBlock));   
+    pos += static_cast<int>(sizeof(SuperBlock));
 
-    sb.s_bm_inode_start = pos;   pos += numInodes;             
-    sb.s_bm_block_start = pos;   pos += numBlocks;            
+    sb.s_bm_inode_start = pos;   pos += numInodes;
+    sb.s_bm_block_start = pos;   pos += numBlocks;
     sb.s_inode_start    = pos;   pos += numInodes * static_cast<int>(sizeof(Inode));
-    sb.s_block_start    = pos;  
+    sb.s_block_start    = pos;
 
-    // Escribir SuperBlock
     if (!writeSuperBlock(diskPath, partStart, sb)) {
         std::cerr << "[Ext2] Error al escribir SuperBlock.\n";
         return false;
     }
 
-    // Inicializar bitmaps con '0'
     {
         std::fstream file(diskPath, std::ios::binary | std::ios::in | std::ios::out);
         if (!file) return false;
 
-        // Bitmap inodos
         file.seekp(sb.s_bm_inode_start);
         for (int i = 0; i < numInodes; i++) file.put('0');
 
-        // Bitmap bloques
         file.seekp(sb.s_bm_block_start);
         for (int i = 0; i < numBlocks; i++) file.put('0');
     }
 
-    // Crear directorio raíz
     createRootDir(diskPath, sb);
     writeSuperBlock(diskPath, partStart, sb);
 

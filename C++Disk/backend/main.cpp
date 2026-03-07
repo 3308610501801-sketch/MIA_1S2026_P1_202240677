@@ -1,6 +1,7 @@
 #include "external/crow_all.h"
 #include "utils/diskManager.h"
 #include "utils/ext2.h"
+#include "utils/mount.h"
 
 #include <iostream>
 #include <fstream>
@@ -10,6 +11,11 @@
 #include <map>
 #include <algorithm>
 #include <cctype>
+#include <sys/stat.h>  
+#include <filesystem>   
+#include <cstring>      
+
+namespace fs = std::filesystem;
 
 static std::string leerArchivo(const std::string& ruta) {
     std::ifstream f(ruta, std::ios::binary);
@@ -56,7 +62,7 @@ static ParsedCommand parseCommand(const std::string& line) {
             first = false;
             continue;
         }
- 
+
         if (token[0] == '-') {
             auto eq = token.find('=');
             if (eq == std::string::npos) continue;
@@ -81,80 +87,299 @@ static ParsedCommand parseCommand(const std::string& line) {
     return cmd;
 }
 
+
 static std::string ejecutarComando(const ParsedCommand& cmd) {
     std::ostringstream out;
 
-    // ── MKDISK ──────────────────────────────────────────────
+    //  MKDISK 
     if (cmd.name == "mkdisk") {
-        int  size = 0;
+        // Verificar parámetros
+        for (auto& p : cmd.params) {
+            if (p.first != "size" && p.first != "fit" &&
+                p.first != "unit" && p.first != "path") {
+                return "Error: parámetro no reconocido en mkdisk: -" + p.first + "\n";
+            }
+        }
+
+        // -size (obligatorio)
+        if (!cmd.params.count("size"))
+            return "Error: mkdisk requiere el parámetro -size.\n";
+
+        int size = 0;
+        try { size = std::stoi(cmd.params.at("size")); }
+        catch (...) { return "Error: -size debe ser un número entero.\n"; }
+        if (size <= 0)
+            return "Error: -size debe ser positivo y mayor que cero.\n";
+
+        // -path (obligatorio)
+        if (!cmd.params.count("path"))
+            return "Error: mkdisk requiere el parámetro -path.\n";
+        std::string path = cmd.params.at("path");
+
+        // -unit (opcional, default M)
         char unit = 'M';
-        char fit  = 'F';
-        std::string path;
+        if (cmd.params.count("unit")) {
+            std::string u = cmd.params.at("unit");
+            std::transform(u.begin(), u.end(), u.begin(), ::toupper);
+            if (u != "K" && u != "M")
+                return "Error: -unit solo acepta K o M.\n";
+            unit = u[0];
+        }
 
-        if (cmd.params.count("size"))  size = std::stoi(cmd.params.at("size"));
-        if (cmd.params.count("unit"))  unit = std::toupper(cmd.params.at("unit")[0]);
-        if (cmd.params.count("fit"))   fit  = std::toupper(cmd.params.at("fit")[0]);
-        if (cmd.params.count("path"))  path = cmd.params.at("path");
+        // -fit (opcional, default FF)
+        char fit = 'F';
+        if (cmd.params.count("fit")) {
+            std::string f = cmd.params.at("fit");
+            std::transform(f.begin(), f.end(), f.begin(), ::toupper);
+            if      (f == "BF") fit = 'B';
+            else if (f == "FF") fit = 'F';
+            else if (f == "WF") fit = 'W';
+            else return "Error: -fit solo acepta BF, FF o WF.\n";
+        }
 
-        if (path.empty() || size <= 0) {
-            return "Error: mkdisk requiere -path y -size.\n";
+        // Crear carpetas del path si no existen
+        fs::path diskPath(path);
+        if (diskPath.has_parent_path()) {
+            std::error_code ec;
+            fs::create_directories(diskPath.parent_path(), ec);
+            if (ec)
+                return "Error: no se pudo crear la ruta: " + diskPath.parent_path().string() + "\n";
         }
 
         int bytes = (unit == 'K') ? size * 1024 : size * 1024 * 1024;
 
         if (DiskManager::createDisk(path, bytes, fit))
             out << "Disco creado exitosamente: " << path
-                << " (" << size << (unit=='K'?"K":"M") << "B)\n";
+                << " (" << size << (unit == 'K' ? "K" : "M") << "B)\n";
         else
-            out << "Error al crear el disco.\n";
+            out << "Error: no se pudo crear el disco en " << path << "\n";
     }
 
+    // -- RMDISK 
     else if (cmd.name == "rmdisk") {
-        std::string path;
-        if (cmd.params.count("path")) path = cmd.params.at("path");
-        if (path.empty()) return "Error: rmdisk requiere -path.\n";
+
+        for (auto& p : cmd.params) {
+            if (p.first != "path")
+                return "Error: parámetro no reconocido en rmdisk: -" + p.first + "\n";
+        }
+
+        if (!cmd.params.count("path"))
+            return "Error: rmdisk requiere el parámetro -path.\n";
+
+        std::string path = cmd.params.at("path");
+
+        // Verificar que el archivo existe
+        if (!fs::exists(path))
+            return "Error: el archivo no existe: " + path + "\n";
 
         if (std::remove(path.c_str()) == 0)
-            out << "Disco eliminado: " << path << "\n";
+            out << "Disco eliminado exitosamente: " << path << "\n";
         else
             out << "Error: no se pudo eliminar " << path << "\n";
     }
 
+    // -- FDISK -----------------------------------------------
     else if (cmd.name == "fdisk") {
-        int  size = 0;
+        // Verificar parámetros no reconocidos
+        for (auto& p : cmd.params) {
+            if (p.first != "size" && p.first != "unit" && p.first != "path" &&
+                p.first != "type" && p.first != "fit" && p.first != "name")
+                return "Error: parámetro no reconocido en fdisk: -" + p.first + "\n";
+        }
+
+        // -size (obligatorio al crear)
+        if (!cmd.params.count("size"))
+            return "Error: fdisk requiere el parámetro -size.\n";
+        int size = 0;
+        try { size = std::stoi(cmd.params.at("size")); }
+        catch (...) { return "Error: -size debe ser un número entero.\n"; }
+        if (size <= 0)
+            return "Error: -size debe ser positivo y mayor que cero.\n";
+
+        // -path (obligatorio)
+        if (!cmd.params.count("path"))
+            return "Error: fdisk requiere el parámetro -path.\n";
+        std::string path = cmd.params.at("path");
+        if (!fs::exists(path))
+            return "Error: el disco no existe: " + path + "\n";
+
+        // -name (obligatorio)
+        if (!cmd.params.count("name"))
+            return "Error: fdisk requiere el parámetro -name.\n";
+        std::string name = cmd.params.at("name");
+
+        // -unit (opcional, default K)
         char unit = 'K';
-        char fit  = 'F';
+        if (cmd.params.count("unit")) {
+            std::string u = cmd.params.at("unit");
+            std::transform(u.begin(), u.end(), u.begin(), ::toupper);
+            if      (u == "B") unit = 'B';
+            else if (u == "K") unit = 'K';
+            else if (u == "M") unit = 'M';
+            else return "Error: -unit solo acepta B, K o M.\n";
+        }
+
+        // -type (opcional, default P)
         char type = 'P';
-        std::string path, name;
+        if (cmd.params.count("type")) {
+            std::string t = cmd.params.at("type");
+            std::transform(t.begin(), t.end(), t.begin(), ::toupper);
+            if      (t == "P") type = 'P';
+            else if (t == "E") type = 'E';
+            else if (t == "L") type = 'L';
+            else return "Error: -type solo acepta P, E o L.\n";
+        }
 
-        if (cmd.params.count("size"))  size = std::stoi(cmd.params.at("size"));
-        if (cmd.params.count("unit"))  unit = std::toupper(cmd.params.at("unit")[0]);
-        if (cmd.params.count("fit"))   fit  = std::toupper(cmd.params.at("fit")[0]);
-        if (cmd.params.count("type"))  type = std::toupper(cmd.params.at("type")[0]);
-        if (cmd.params.count("path"))  path = cmd.params.at("path");
-        if (cmd.params.count("name"))  name = cmd.params.at("name");
+        // -fit (opcional, default WF)
+        char fit = 'W';
+        if (cmd.params.count("fit")) {
+            std::string f = cmd.params.at("fit");
+            std::transform(f.begin(), f.end(), f.begin(), ::toupper);
+            if      (f == "BF") fit = 'B';
+            else if (f == "FF") fit = 'F';
+            else if (f == "WF") fit = 'W';
+            else return "Error: -fit solo acepta BF, FF o WF.\n";
+        }
 
-        if (path.empty() || name.empty() || size <= 0)
-            return "Error: fdisk requiere -path, -name y -size.\n";
+        // Calcular bytes según unidad
+        int bytes = size;
+        if      (unit == 'K') bytes = size * 1024;
+        else if (unit == 'M') bytes = size * 1024 * 1024;
 
-        int bytes = (unit == 'M') ? size * 1024 * 1024 : size * 1024;
+        // Tipo L   usar addLogicalUnit
+        if (type == 'L') {
+            // Buscar la partición extendida en el disco
+            MBR mbr;
+            if (!DiskManager::readMBR(path, mbr))
+                return "Error: no se pudo leer el disco.\n";
 
-        if (DiskManager::addPartition(path, name, bytes, type, fit))
-            out << "Partición '" << name << "' creada en " << path << "\n";
-        else
-            out << "Error al crear la partición.\n";
+            std::string extName = "";
+            bool hayExtendida = false;
+            for (int i = 0; i < 4; i++) {
+                if (mbr.mbr_partitions[i].part_type == 'E' &&
+                    mbr.mbr_partitions[i].part_start != -1) {
+                    extName     = mbr.mbr_partitions[i].part_name;
+                    hayExtendida = true;
+                    break;
+                }
+            }
+            if (!hayExtendida)
+                return "Error: no existe una partición extendida en el disco. No se puede crear una lógica.\n";
+
+            if (DiskManager::addLogicalUnit(path, extName, name, bytes, fit))
+                out << "Partición lógica '" << name << "' creada en " << path << "\n";
+            else
+                out << "Error: no se pudo crear la partición lógica. Verifique el espacio disponible.\n";
+        }
+        else {
+            // Tipo P o E   addPartition
+            if (DiskManager::addPartition(path, name, bytes, type, fit))
+                out << "Partición '" << name << "' ("
+                    << (type == 'P' ? "Primaria" : "Extendida")
+                    << ") creada en " << path << "\n";
+            else
+                out << "Error: no se pudo crear la partición. Verifique espacio, límite de 4 particiones (P+E) o nombre duplicado.\n";
+        }
     }
 
+    // -- MOUNT -----------------------------------------------
+    else if (cmd.name == "mount") {
+        for (auto& p : cmd.params) {
+            if (p.first != "path" && p.first != "name")
+                return "Error: parámetro no reconocido en mount: -" + p.first + "\n";
+        }
+        if (!cmd.params.count("path"))
+            return "Error: mount requiere el parámetro -path.\n";
+        if (!cmd.params.count("name"))
+            return "Error: mount requiere el parámetro -name.\n";
+
+        std::string path     = cmd.params.at("path");
+        std::string partName = cmd.params.at("name");
+
+        if (!fs::exists(path))
+            return "Error: el disco no existe: " + path + "\n";
+
+        // Verificar que la partición existe y es primaria
+        MBR mbr;
+        if (!DiskManager::readMBR(path, mbr))
+            return "Error: no se pudo leer el disco.\n";
+
+        int idx = -1;
+        for (int i = 0; i < 4; i++) {
+            if (std::string(mbr.mbr_partitions[i].part_name) == partName) {
+                idx = i; break;
+            }
+        }
+        if (idx == -1)
+            return "Error: la partición '" + partName + "' no existe en " + path + "\n";
+        if (mbr.mbr_partitions[idx].part_type != 'P')
+            return "Error: solo se pueden montar particiones primarias.\n";
+
+        // Verificar que no esté ya montada
+        if (MountManager::isMounted(path, partName))
+            return "Error: la partición '" + partName + "' ya está montada.\n";
+
+        // Generar ID y registrar en memoria
+        std::string newID = MountManager::mount(path, partName);
+
+        // Calcular correlativo (cuántas particiones de este disco hay montadas)
+        int correlativo = 0;
+        for (auto& mp : MountManager::mountedPartitions)
+            if (mp.diskPath == path) correlativo++;
+
+        // Actualizar MBR en disco
+        mbr.mbr_partitions[idx].part_status      = '1';
+        mbr.mbr_partitions[idx].part_correlative = correlativo;
+        std::strncpy(mbr.mbr_partitions[idx].part_id, newID.c_str(), 3);
+        mbr.mbr_partitions[idx].part_id[3] = '\0';
+        DiskManager::writeMBR(path, mbr);
+
+        out << "Partición montada exitosamente.\n"
+            << "  ID:        " << newID    << "\n"
+            << "  Disco:     " << path     << "\n"
+            << "  Partición: " << partName << "\n";
+    }
+
+    // -- MOUNTED ---------------------------------------------
+    else if (cmd.name == "mounted") {
+        if (!cmd.params.empty())
+            return "Error: mounted no acepta parámetros.\n";
+        out << MountManager::listMounted();
+    }
+
+    // -- MKFS ------------------------------------------------
     else if (cmd.name == "mkfs") {
-        std::string id, type;
-        if (cmd.params.count("id"))   id   = cmd.params.at("id");
-        if (cmd.params.count("type")) type = cmd.params.at("type");
+        for (auto& p : cmd.params) {
+            if (p.first != "id" && p.first != "type")
+                return "Error: parámetro no reconocido en mkfs: -" + p.first + "\n";
+        }
+        if (!cmd.params.count("id"))
+            return "Error: mkfs requiere el parámetro -id.\n";
 
-        out << "[mkfs] Comando recibido. ID=" << id
-            << " Tipo=" << type << "\n"
-            << "NOTA: mkfs requiere que la partición esté montada (mount).\n";
+        std::string id = cmd.params.at("id");
+
+        // -type (opcional, default full)
+        std::string type = "full";
+        if (cmd.params.count("type")) {
+            type = cmd.params.at("type");
+            std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+            if (type != "full")
+                return "Error: -type solo acepta 'full'.\n";
+        }
+
+        // Buscar el ID en la tabla de montajes
+        MountedPartition* target = MountManager::findByID(id);
+        if (!target)
+            return "Error: el ID '" + id + "' no existe. Use mount primero.\n";
+
+        if (Ext2Manager::formatPartition(target->diskPath, target->partName))
+            out << "Partición '" << target->partName << "' (ID: " << id
+                << ") formateada con EXT2 exitosamente.\n";
+        else
+            out << "Error: no se pudo formatear la partición.\n";
     }
 
+    // -- DESCONOCIDO -----------------------------------------
     else {
         out << "Comando no reconocido: " << cmd.name << "\n";
     }
@@ -168,6 +393,7 @@ static std::string procesarTexto(const std::string& texto) {
     std::string linea;
 
     while (std::getline(iss, linea)) {
+        // Ignorar comentarios y líneas vacías
         auto start = linea.find_first_not_of(" \t\r");
         if (start == std::string::npos) continue;
         if (linea[start] == '#') {
@@ -183,10 +409,10 @@ static std::string procesarTexto(const std::string& texto) {
     return resultado.str();
 }
 
-
 int main() {
     crow::SimpleApp app;
 
+    // INDEX
     CROW_ROUTE(app, "/")
     ([]() {
         crow::response res;
@@ -195,6 +421,7 @@ int main() {
         return res;
     });
 
+    // ARCHIVOS ESTÁTICOS
     CROW_ROUTE(app, "/<path>")
     ([](const std::string& path) {
         std::string fullPath = "../frontend/" + path;
